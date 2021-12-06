@@ -12,6 +12,7 @@ struct Token {
 	string name;
 	Token(char ch) :kind(ch), value(0) { }
 	Token(char ch, double val) :kind(ch), value(val) { }
+	Token(char ch, string str) :kind(ch), name(str),value(0) { }
 };
 
 class Token_stream {
@@ -72,15 +73,16 @@ Token Token_stream::get()
 	return Token(number, val);
 	}
 	default:
-		if (isalpha(ch)) {
+		if (isalpha(ch) || ch == '_') {
 			string s;
 			s += ch;
-			while (cin.get(ch) && (isalpha(ch) || isdigit(ch))) s += ch;
+			while (cin.get(ch) && (isalpha(ch) || isdigit(ch) || ch == '_')) s += ch;
 			cin.unget();
+
 			if (s == "let") return Token(let);
 			if (s == "quit") return Token(quit);
 			
-			return Token(name);
+			return Token(name, s);
 		}
 		error("Bad token");
 	}
@@ -108,11 +110,15 @@ void Token_stream::ignore(char c)
 struct Variable {
 	string name;
 	double value;
-	Variable(string n, double v) :name(n), value(v) { }
+	bool isConstant;
+	//Variable(string n, double v) :name(n), value(v), isConstant(f) { }
+	Variable(string n, double v, bool t) :name(n), value(v), isConstant(t) { }
 };
 
 ///Contains all variables
 vector<Variable> names;
+
+
 
 //////Recieves a string and tries to find a variable with that name
 //////
@@ -123,6 +129,7 @@ double get_value(string s)
 {
 	for (int i = 0; i < names.size(); ++i)
 		if (names[i].name == s) return names[i].value;
+	
 	error("get: undefined name ", s);
 }
 
@@ -156,6 +163,8 @@ bool is_declared(string s)
 Token_stream ts;
 
 double expression();
+double declaration();
+
 
 
 //////Gets a token kind
@@ -170,6 +179,8 @@ double expression();
 //////
 //////if none apply: Error
 //////
+
+
 double primary()
 {
 	Token t = ts.get();
@@ -185,6 +196,8 @@ double primary()
 		return t.value;
 	case name:
 		return get_value(t.name);
+	case let:
+		return declaration();
 	default:
 		error("primary expected");
 	}
@@ -207,6 +220,12 @@ double term()
 	while (true) {
 		Token t = ts.get();
 		switch (t.kind) {
+		case number: {
+		
+			ts.unget(t);
+			left *= primary();
+		
+		}
 		case '*':
 			left *= primary();
 			break;
@@ -239,6 +258,7 @@ double expression()
 	double left = term();
 	while (true) {
 		Token t = ts.get();
+
 		switch (t.kind) {
 		case '+':
 			left += term();
@@ -251,6 +271,26 @@ double expression()
 			return left;
 		}
 	}
+}
+
+///Allows the change of the value of a variable. Usefull if you are constantly modifying a value, but it may be possible to accidentally change a variable that wasn't suppossed to cahnge
+void changeValue(string name, double d) {
+
+	for (int i = 0; i < names.size(); ++i)
+		if (names[i].name == name) {
+
+			names[i].value = d;
+			return;
+		}
+}
+
+bool isConst(string name) {
+
+	for (int i = 0; i < names.size(); ++i)
+		if (names[i].name == name) {
+
+			return names[i].isConstant;
+		}
 }
 
 //////Declares a Variable
@@ -268,16 +308,33 @@ double expression()
 //////Creates a Variable and add it to names
 //////		
 //////Return the variable value
+
 double declaration()
 {
+	bool change = false;
+
 	Token t = ts.get();
 	if (t.kind != 'a') error("name expected in declaration");
 	string name = t.name;
-	if (is_declared(name)) error(name, " declared twice");
+
+	if (is_declared(name)) {
+
+		if (isConst(name))error("Attempted to change a constant value");
+
+		else change = true;
+	}
+
 	Token t2 = ts.get();
 	if (t2.kind != '=') error("= missing in declaration of ", name);
+
 	double d = expression();
-	names.push_back(Variable(name, d));
+
+	if (change == false)
+		names.push_back(Variable(name, d, false));
+
+	else
+		changeValue(name, d);
+
 	return d;
 }
 
@@ -289,13 +346,20 @@ double declaration()
 //////
 double statement()
 {
+
 	Token t = ts.get();
+
 	switch (t.kind) {
-	case let:
+	case let: 
 		return declaration();
-	default:
+
+	default: {
+
 		ts.unget(t);
+
 		return expression();
+	}
+		
 	}
 }
 ///Clean stream
@@ -311,14 +375,23 @@ const string result = "= ";
 ///Starter fucntion
 void calculate()
 {
+	names.push_back(Variable("k", 1000, true));
+	names.push_back(Variable("pi", 3.14, true));
+	names.push_back(Variable("e", 2.72, true));
+
 	//Run as long as there are no errors // Based around ts.get
 	while (true) try {
+
 		cout << prompt;
 		Token t = ts.get();
+
 		while (t.kind == print) t = ts.get();
+
 		if (t.kind == quit) return;
+
 		ts.unget(t);
-		cout << result << statement() << endl;
+
+		cout << result << statement() << endl;	
 	}
 	catch (runtime_error& e) {
 		cerr << e.what() << endl;
